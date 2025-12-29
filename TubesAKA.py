@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 # =========================
-# PAGE CONFIG
+# PAGE CONFIG (HARUS PALING ATAS)
 # =========================
 st.set_page_config(
     page_title="Greedy Diet Planner",
@@ -17,29 +17,35 @@ st.set_page_config(
 )
 
 # =========================
-# CSS
+# THEME (OPSIONAL - pastel)
 # =========================
 st.markdown("""
 <style>
 .stApp { background: #FCF8F8; }
 section[data-testid="stSidebar"] { background: #FBEFEF; border-right: 1px solid #F9DFDF; }
-div[data-testid="stMetric"], div[data-testid="stContainer"], div[data-testid="stVerticalBlockBorderWrapper"]{
+div[data-testid="stMetric"], div[data-testid="stVerticalBlockBorderWrapper"], div[data-testid="stContainer"]{
   background:#FBEFEF; border:1px solid #F9DFDF; border-radius:16px; padding:12px;
 }
 hr { border:none; border-top:1px solid #F9DFDF; }
+div.stButton > button {
+  background:#F5AFAF !important; color:white !important; border:0 !important;
+  border-radius:14px !important; padding:10px 16px !important; font-weight:700 !important;
+  box-shadow:0 6px 18px rgba(245,175,175,0.35) !important;
+}
+div.stButton > button:hover { background:#f39e9e !important; transform: translateY(-1px); }
 </style>
 """, unsafe_allow_html=True)
 
 # =========================
-# DATA STRUCTURE
+# DATA MODEL
 # =========================
-@dataclass
+@dataclass(frozen=True)
 class Makanan:
     nama: str
     kalori: int
 
 # =========================
-# LOAD CSV
+# DATA LOADING
 # =========================
 @st.cache_data(show_spinner=False)
 def load_menu_from_csv(csv_path: str) -> List[Makanan]:
@@ -49,86 +55,65 @@ def load_menu_from_csv(csv_path: str) -> List[Makanan]:
     if not required_cols.issubset(df.columns):
         raise ValueError(f"Kolom CSV harus ada: {required_cols}. Kolom ditemukan: {set(df.columns)}")
 
-    return [
-        Makanan(nama=str(row["Nama_Makanan"]), kalori=int(row["Kalori_kcal"]))
-        for _, row in df.iterrows()
-    ]
+    df["Kalori_kcal"] = pd.to_numeric(df["Kalori_kcal"], errors="coerce")
+    df = df.dropna(subset=["Kalori_kcal", "Nama_Makanan"])
+
+    menu = [Makanan(str(r["Nama_Makanan"]), int(r["Kalori_kcal"])) for _, r in df.iterrows()]
+    if not menu:
+        raise ValueError("Data menu kosong setelah validasi. Cek isi CSV kamu.")
+    return menu
 
 # =========================
-# GREEDY ITERATIVE
+# GREEDY: CLOSEST FIRST
 # =========================
-def greedy_menu(target: int, menu: List[Makanan]) -> List[Makanan]:
+def greedy_iteratif(target: int, menu: List[Makanan]) -> List[Makanan]:
+    hasil = []
     sisa = target
-    hasil: List[Makanan] = []
 
     while sisa > 0:
-        idx_pilih = -1
-        selisih_min = float("inf")
-
-        for i, m in enumerate(menu):
-            selisih = abs(m.kalori - sisa)
-            if selisih < selisih_min:
-                selisih_min = selisih
-                idx_pilih = i
-
-        if idx_pilih == -1:
-            break
-
-        hasil.append(menu[idx_pilih])
-        sisa -= menu[idx_pilih].kalori
-
-        if sisa <= 0:
-            break
+        pilih = min(menu, key=lambda m: abs(m.kalori - sisa))
+        hasil.append(pilih)
+        sisa -= pilih.kalori
 
     return hasil
 
-# =========================
-# GREEDY RECURSIVE
-# =========================
-def greedy_menu_rekursif(sisa: int, menu: List[Makanan], hasil: List[Makanan]) -> None:
+def greedy_rekursif(sisa: int, menu: List[Makanan], hasil: List[Makanan]) -> None:
     if sisa <= 0:
         return
 
-    idx_pilih = -1
-    selisih_min = float("inf")
-
-    for i, m in enumerate(menu):
-        selisih = abs(m.kalori - sisa)
-        if selisih < selisih_min:
-            selisih_min = selisih
-            idx_pilih = i
-
-    if idx_pilih == -1:
-        return
-
-    hasil.append(menu[idx_pilih])
-    greedy_menu_rekursif(sisa - menu[idx_pilih].kalori, menu, hasil)
+    pilih = min(menu, key=lambda m: abs(m.kalori - sisa))
+    hasil.append(pilih)
+    greedy_rekursif(sisa - pilih.kalori, menu, hasil)
 
 # =========================
-# TIME MEASURE
+# TIMING UTILITIES
 # =========================
 def measure_time_iteratif(target: int, menu: List[Makanan], trials: int = 5) -> Tuple[List[Makanan], float]:
     times = []
-    result: List[Makanan] = []
+    result = []
+
     for _ in range(trials):
         start = time.perf_counter()
-        result = greedy_menu(target, menu)
+        result = greedy_iteratif(target, menu)
         end = time.perf_counter()
-        times.append((end - start) * 1_000_000)
+        times.append((end - start) * 1_000_000)  # µs
+
     return result, sum(times) / len(times)
 
 def measure_time_rekursif(target: int, menu: List[Makanan], trials: int = 5) -> Tuple[List[Makanan], float]:
     times = []
-    result: List[Makanan] = []
+    result = []
+
     for _ in range(trials):
         start = time.perf_counter()
         result = []
-        greedy_menu_rekursif(target, menu, result)
+        greedy_rekursif(target, menu, result)
         end = time.perf_counter()
-        times.append((end - start) * 1_000_000)
+        times.append((end - start) * 1_000_000)  # µs
+
     return result, sum(times) / len(times)
 
-def to_df(items: List[Makanan]) -> pd.DataFrame:
+def hasil_to_df(items: List[Makanan]) -> pd.DataFrame:
     return pd.DataFrame([{"Menu": m.nama, "Kalori (kkal)": m.kalori} for m in items])
 
 def summarize(target: int, items: List[Makanan]) -> Tuple[int, int, str]:
@@ -149,13 +134,14 @@ st.sidebar.title("⚙️ Pengaturan")
 csv_file = st.sidebar.text_input("File CSV", value="1000_data_makanan_kalori.csv")
 target = st.sidebar.slider("Target Kalori (kkal)", 50, 3000, 650, 50)
 trials = st.sidebar.slider("Trials (rata-rata waktu)", 1, 30, 5, 1)
+show_preview = st.sidebar.checkbox("Preview 10 baris CSV", value=False)
 show_chart = st.sidebar.checkbox("Tampilkan grafik waktu", value=True)
 
 # =========================
 # LOAD DATA
 # =========================
 try:
-    MENU_DATABASE = load_menu_from_csv(csv_file)
+    MENU = load_menu_from_csv(csv_file)
 except Exception as e:
     st.error(f"Gagal membaca CSV: {e}")
     st.stop()
@@ -163,58 +149,54 @@ except Exception as e:
 # =========================
 # HEADER
 # =========================
-st.title("💗 Rekomendasi Menu Diet (Greedy Closest First)")
-st.caption(f"Data dari CSV: **{len(MENU_DATABASE)}** menu • Target: **{target} kkal** • Trials: **{trials}**")
+st.title("💗 Greedy Diet Planner (Closest First)")
+st.caption(f"Dataset: **{len(MENU)}** menu • Target: **{target} kkal** • Trials: **{trials}**")
 
-# =========================
-# AUTO-RUN: langsung hitung saat page dibuka / target berubah
-# =========================
-with st.spinner("Menyusun rekomendasi menu..."):
-    hasil_iter, t_iter = measure_time_iteratif(target, MENU_DATABASE, trials=trials)
-    hasil_rec, t_rec = measure_time_rekursif(target, MENU_DATABASE, trials=trials)
-
-total_iter, diff_iter, status_iter = summarize(target, hasil_iter)
-total_rec, diff_rec, status_rec = summarize(target, hasil_rec)
-
-# =========================
-# SIDE-BY-SIDE RESULTS (NO SCROLL)
-# =========================
-colL, colR = st.columns(2, gap="large")
-
-with colL:
-    st.subheader("✅ Iteratif")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total", f"{total_iter} kkal")
-    m2.metric("Item", f"{len(hasil_iter)}")
-    m3.metric("Waktu", f"{t_iter:.2f} µs")
-    st.write(f"**Status:** {status_iter}")
-    st.dataframe(to_df(hasil_iter), use_container_width=True, height=320)
-
-with colR:
-    st.subheader("🔁 Rekursif")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total", f"{total_rec} kkal")
-    m2.metric("Item", f"{len(hasil_rec)}")
-    m3.metric("Waktu", f"{t_rec:.2f} µs")
-    st.write(f"**Status:** {status_rec}")
-    st.dataframe(to_df(hasil_rec), use_container_width=True, height=320)
+if show_preview:
+    st.subheader("🧾 Preview Data CSV (10 baris)")
+    st.dataframe(pd.read_csv(csv_file).head(10), width="stretch", height=280)
 
 st.markdown("---")
 
 # =========================
-# QUICK COMPARISON ROW
+# AUTO-RUN RESULTS (MINIM SCROLL)
 # =========================
+with st.spinner("Menyusun rekomendasi menu..."):
+    hasil_iter, t_iter = measure_time_iteratif(target, MENU, trials=trials)
+    hasil_rec, t_rec = measure_time_rekursif(target, MENU, trials=trials)
+
+total_i, diff_i, status_i = summarize(target, hasil_iter)
+total_r, diff_r, status_r = summarize(target, hasil_rec)
+
+colL, colR = st.columns(2, gap="large")
+
+with colL:
+    st.subheader("✅ Iteratif")
+    a, b, c = st.columns(3)
+    a.metric("Total", f"{total_i} kkal")
+    b.metric("Item", f"{len(hasil_iter)}")
+    c.metric("Waktu", f"{t_iter:.2f} µs")
+    st.write(f"**Status:** {status_i}")
+    st.dataframe(hasil_to_df(hasil_iter), width="stretch", height=320, hide_index=True)
+
+with colR:
+    st.subheader("🔁 Rekursif")
+    a, b, c = st.columns(3)
+    a.metric("Total", f"{total_r} kkal")
+    b.metric("Item", f"{len(hasil_rec)}")
+    c.metric("Waktu", f"{t_rec:.2f} µs")
+    st.write(f"**Status:** {status_r}")
+    st.dataframe(hasil_to_df(hasil_rec), width="stretch", height=320, hide_index=True)
+
+st.markdown("---")
+
 c1, c2, c3 = st.columns(3)
 faster = "Iteratif" if t_iter < t_rec else ("Rekursif" if t_rec < t_iter else "Seimbang")
-same_total = "SAMA" if total_iter == total_rec else "BEDA"
-
+same_total = "SAMA" if total_i == total_r else "BEDA"
 c1.metric("Lebih cepat", faster)
 c2.metric("Total hasil", same_total)
 c3.metric("Selisih waktu", f"{abs(t_iter - t_rec):.2f} µs")
 
-# =========================
-# CHART (OPTIONAL, ringkas)
-# =========================
 if show_chart:
     st.subheader("📊 Perbandingan Waktu Eksekusi")
     fig, ax = plt.subplots()
@@ -223,10 +205,7 @@ if show_chart:
     ax.set_title(f"Target = {target} kkal")
     for i, v in enumerate([t_iter, t_rec]):
         ax.text(i, v * 1.01, f"{v:.2f}", ha="center")
-    st.pyplot(fig, use_container_width=True)
+    st.pyplot(fig, width="stretch")
     plt.close(fig)
 
-# =========================
-# FOOTNOTE
-# =========================
-st.caption("Catatan: Greedy tidak menjamin solusi optimal global. Pendekatan Closest First memilih kalori terdekat terhadap sisa target.")
+st.caption("Catatan: Greedy tidak menjamin solusi optimal global. Closest First memilih menu dengan kalori terdekat terhadap sisa target.")
